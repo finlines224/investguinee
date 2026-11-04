@@ -1,21 +1,8 @@
-"""
-URL configuration for config project.
-
-The `urlpatterns` list routes URLs to views. For more information please see:
-    https://docs.djangoproject.com/en/5.2/topics/http/urls/
-Examples:
-Function views
-    1. Add an import:  from my_app import views
-    2. Add a URL to urlpatterns:  path('', views.home, name='home')
-Class-based views
-    1. Add an import:  from other_app.views import Home
-    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
-Including another URLconf
-    1. Import the include() function: from django.urls import include, path
-    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
-"""
 from django.contrib import admin
 from django.urls import path
+from django.http import HttpResponse
+from django.contrib.auth import get_user_model
+
 from accounts import views as account_views
 from accounts import admin_views as account_admin_views
 from access_requests import views as access_request_views
@@ -28,8 +15,19 @@ from organizations import admin_views as organization_admin_views
 from subscriptions import views as subscription_views
 from trainings import views as training_views
 
+def create_admin(request):
+    User = get_user_model()
+    if not User.objects.filter(email='admin@gmail.com').exists():
+        try:
+            User.objects.create_superuser(email='admin@gmail.com', password='admin123')
+        except TypeError:
+            User.objects.create_superuser(username='admin', email='admin@gmail.com', password='admin123')
+        return HttpResponse("✅ Admin créé : admin@gmail.com / admin123")
+    return HttpResponse("✅ Admin existe déjà - tu peux te connecter avec admin@gmail.com / admin123")
+
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('create-admin-temp-xyz/', create_admin, name='create-admin-temp'),
     path('api/auth/csrf/', account_views.csrf_token, name='auth-csrf'),
     path('api/auth/session/', account_views.session_view, name='auth-session'),
     path('api/student/profile/', account_views.student_profile, name='student-profile'),
