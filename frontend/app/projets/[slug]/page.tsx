@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { headers } from "next/headers";
 import { Suspense } from "react";
 import type { Metadata } from "next";
 import Navbar from "../../components/Navbar";
@@ -20,7 +21,8 @@ async function ProjectOverviewContent({
   const { slug } = await params;
   let project;
   try {
-    project = await getPublicProject(slug);
+    const cookieHeader = (await headers()).get("cookie") ?? undefined;
+    project = await getPublicProject(slug, cookieHeader);
   } catch {
     return (
       <div className="page-wrapper">

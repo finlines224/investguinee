@@ -8,7 +8,14 @@ import {
   getEntrepreneurProjects,
   type EntrepreneurProject,
 } from "../../lib/entrepreneur-api";
+import {
+  getAppointmentCatalog,
+  type AppointmentRecord,
+} from "../../lib/appointment-api";
 import { getCurrentUser, type AuthenticatedUser } from "../../lib/session-api";
+import AppointmentManagement from "../appointments/AppointmentManagement";
+import ConversationWorkspace from "../messaging/ConversationWorkspace";
+import NotificationInbox from "../notifications/NotificationInbox";
 
 // ── Nav item type ───────────────────────────────────────────────────────────
 type NavItem = {
@@ -28,8 +35,8 @@ const NAV_ITEMS: NavItem[] = [
   { id: "marketplace", label: "Marketplace", icon: "🛒", href: "/espace-entrepreneur" },
   { id: "appui", label: "Demandes d'appui", icon: "🎯", href: "/espace-entrepreneur" },
   { id: "rdv", label: "Rendez-vous", icon: "📅", href: "/espace-entrepreneur" },
-  { id: "messagerie", label: "Messagerie", icon: "✉️", badge: 5, href: "/espace-entrepreneur" },
-  { id: "notifs", label: "Notifications", icon: "🔔", badge: 2, href: "/espace-entrepreneur" },
+  { id: "messagerie", label: "Messagerie", icon: "✉️", href: "/espace-entrepreneur" },
+  { id: "notifs", label: "Notifications", icon: "🔔", href: "/espace-entrepreneur" },
   { id: "ressources", label: "Ressources", icon: "📚", href: "/espace-entrepreneur" },
   { id: "parametres", label: "Paramètres", icon: "⚙️", href: "/espace-entrepreneur" },
 ];
@@ -93,7 +100,10 @@ export default function EntrepreneurDashboard() {
   const router = useRouter();
   const [user, setUser] = useState<AuthenticatedUser | null>(null);
   const [projects, setProjects] = useState<EntrepreneurProject[]>([]);
+  const [appointments, setAppointments] = useState<AppointmentRecord[]>([]);
+  const [appointmentError, setAppointmentError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [activeNav, setActiveNav] = useState("tableau-de-bord");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -110,11 +120,30 @@ export default function EntrepreneurDashboard() {
       const entrepreneurProjects = await getEntrepreneurProjects();
       setUser(currentUser);
       setProjects(entrepreneurProjects);
-    } catch { /* silent */ }
+      try {
+        const appointmentCatalog = await getAppointmentCatalog(
+          "entrepreneur/appointments/",
+          { query: "", status: "all", page: 1, pageSize: 10 },
+          new AbortController().signal,
+        );
+        setAppointments(appointmentCatalog.appointments);
+      } catch (error) {
+        setAppointmentError(
+          error instanceof Error ? error.message : "Impossible de charger les rendez-vous.",
+        );
+      }
+    } catch (error) {
+      setLoadError(
+        error instanceof Error ? error.message : "Impossible de charger votre espace.",
+      );
+    }
     finally { setIsLoading(false); }
   }, [router]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
@@ -134,16 +163,13 @@ export default function EntrepreneurDashboard() {
     );
   }
 
-  if (!user) return null;
+  if (!user) {
+    return loadError ? <p className="ed-loading" role="alert">{loadError}</p> : null;
+  }
 
   const firstName = user.firstName || user.fullName.split(" ")[0] || "Entrepreneur";
   const initials = `${user.firstName?.[0] ?? ""}${user.lastName?.[0] ?? ""}`.toUpperCase() || "E";
   const featuredProject = projects[0] ?? null;
-  const today = new Date();
-  const todayDay = today.toLocaleDateString("fr-FR", { weekday: "short" });
-  const todayDate = today.getDate();
-  const todayMonth = today.toLocaleDateString("fr-FR", { month: "short" });
-
   return (
     <div className="ed-layout">
       {/* ── Mobile overlay ── */}
@@ -237,7 +263,13 @@ export default function EntrepreneurDashboard() {
 
         {/* ── Scrollable content ── */}
         <div className="ed-content">
-
+          {activeNav === "rdv" ? <AppointmentManagement role="entrepreneur" /> : null}
+          {activeNav === "messagerie" ? <ConversationWorkspace role="entrepreneur" /> : null}
+          {activeNav === "notifs" ? <NotificationInbox /> : null}
+          <div
+            className="ed-dashboard-content"
+            hidden={activeNav === "rdv" || activeNav === "messagerie" || activeNav === "notifs"}
+          >
           {/* ── Hero banner ── */}
           <section className="ed-hero" aria-label="Bienvenue">
             <div className="ed-hero__left">
@@ -439,27 +471,41 @@ export default function EntrepreneurDashboard() {
                   </div>
                   <Link href="/espace-entrepreneur" className="ed-link-more">Voir tous →</Link>
                 </div>
-                <div className="ed-rdv">
-                  <div className="ed-rdv__date">
-                    <span className="ed-rdv__day">{todayDay.slice(0, 3)}.</span>
-                    <span className="ed-rdv__num">{todayDate}</span>
-                    <span className="ed-rdv__month">{todayMonth.charAt(0).toUpperCase() + todayMonth.slice(1)}.</span>
-                  </div>
-                  <div className="ed-rdv__body">
-                    <p className="ed-rdv__title">Réunion avec un investisseur</p>
-                    <p className="ed-rdv__meta">10h00 – 11h00 | En ligne</p>
-                  </div>
-                  <button type="button" className="ed-btn ed-btn--primary-sm">
-                    <span aria-hidden="true">▶</span> Rejoindre
-                  </button>
-                </div>
+                {appointmentError ? (
+                  <p role="alert">{appointmentError}</p>
+                ) : appointments.length ? (
+                  appointments.slice(0, 2).map((appointment) => (
+                    <div className="ed-rdv" key={appointment.id}>
+                      <div className="ed-rdv__date">
+                        <span className="ed-rdv__day">
+                          {new Intl.DateTimeFormat("fr-FR", { weekday: "short" }).format(new Date(appointment.scheduledAt))}
+                        </span>
+                        <span className="ed-rdv__num">
+                          {new Intl.DateTimeFormat("fr-FR", { day: "2-digit" }).format(new Date(appointment.scheduledAt))}
+                        </span>
+                        <span className="ed-rdv__month">
+                          {new Intl.DateTimeFormat("fr-FR", { month: "short" }).format(new Date(appointment.scheduledAt))}
+                        </span>
+                      </div>
+                      <div className="ed-rdv__body">
+                        <p className="ed-rdv__title">{appointment.projectTitle}</p>
+                        <p className="ed-rdv__meta">
+                          {new Intl.DateTimeFormat("fr-FR", { timeStyle: "short" }).format(new Date(appointment.scheduledAt))}
+                          {" · "}{appointment.investor} · {appointment.statusLabel}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p>Aucune demande de rendez-vous pour le moment.</p>
+                )}
               </section>
 
               {/* Besoin d'accompagnement */}
               <section className="ed-cta-card">
                 <div className="ed-cta-card__content">
                   <span className="ed-cta-card__icon" aria-hidden="true">🤝</span>
-                  <h3 className="ed-cta-card__title">Besoin d'accompagnement ?</h3>
+                  <h3 className="ed-cta-card__title">Besoin d&apos;accompagnement ?</h3>
                   <p className="ed-cta-card__sub">Bénéficiez du soutien de nos experts et mentors</p>
                   <button type="button" className="ed-btn ed-btn--green-sm">
                     Demander un appui →
@@ -468,6 +514,7 @@ export default function EntrepreneurDashboard() {
                 <div className="ed-cta-card__img" aria-hidden="true">👩‍💼</div>
               </section>
             </div>
+          </div>
           </div>
         </div>
       </div>

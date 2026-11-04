@@ -6,6 +6,9 @@ from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 from django.contrib.auth.tokens import default_token_generator
 
+from organizations.models import Organization
+from projects.models import EntrepreneurProject
+
 from .models import User
 
 
@@ -147,6 +150,102 @@ class AuthApiTests(TestCase):
         wrong_role_response = self.client.get("/api/student/profile/")
         self.assertEqual(wrong_role_response.status_code, 403)
 
+    def test_investor_profile_is_private_to_authenticated_investors(self):
+        anonymous_response = self.client.get("/api/investor/profile/")
+        self.assertEqual(anonymous_response.status_code, 401)
+
+        student = self.create_user()
+        student.role = User.Role.STUDENT
+        student.save(update_fields=["role"])
+        self.client.force_login(student)
+        wrong_role_response = self.client.get("/api/investor/profile/")
+        self.assertEqual(wrong_role_response.status_code, 403)
+
+    def test_investor_can_read_and_update_their_profile(self):
+        investor = self.create_user()
+        investor.role = User.Role.INVESTOR
+        investor.phone_number = "+224 622 00 00 00"
+        investor.profile_data = {
+            "profile_type": "INDIVIDUAL",
+            "sector": "AGRICULTURE",
+            "custom_data": "preserved",
+        }
+        investor.save(update_fields=["role", "phone_number", "profile_data"])
+        self.client.force_login(investor)
+
+        read_response = self.client.get("/api/investor/profile/")
+        self.assertEqual(read_response.status_code, 200)
+        self.assertEqual(
+            read_response.json(),
+            {
+                "firstName": "Aissatou",
+                "lastName": "Diallo",
+                "fullName": "Aissatou Diallo",
+                "email": investor.email,
+                "phoneNumber": "+224 622 00 00 00",
+                "profileType": "INDIVIDUAL",
+                "sector": "AGRICULTURE",
+                "isVerified": False,
+            },
+        )
+
+        update_response = self.client.patch(
+            "/api/investor/profile/",
+            data=json.dumps(
+                {
+                    "firstName": "Fatou",
+                    "lastName": "Camara",
+                    "phoneNumber": "+224 611 11 11 11",
+                    "profileType": "ORGANIZATION",
+                    "sector": "TECHNOLOGY",
+                }
+            ),
+            content_type="application/json",
+            HTTP_X_CSRFTOKEN=self.csrf_token,
+        )
+        self.assertEqual(update_response.status_code, 200)
+        investor.refresh_from_db()
+        self.assertEqual(investor.first_name, "Fatou")
+        self.assertEqual(investor.last_name, "Camara")
+        self.assertEqual(investor.phone_number, "+224 611 11 11 11")
+        self.assertEqual(
+            investor.profile_data,
+            {
+                "profile_type": "ORGANIZATION",
+                "sector": "TECHNOLOGY",
+                "custom_data": "preserved",
+            },
+        )
+
+    def test_investor_profile_update_validates_payload_and_csrf(self):
+        investor = self.create_user()
+        investor.role = User.Role.INVESTOR
+        investor.save(update_fields=["role"])
+        self.client.force_login(investor)
+        profile = {
+            "firstName": "Aissatou",
+            "lastName": "Diallo",
+            "phoneNumber": "+224 622 00 00 00",
+            "profileType": "INDIVIDUAL",
+            "sector": "AGRICULTURE",
+        }
+
+        invalid_response = self.client.patch(
+            "/api/investor/profile/",
+            data=json.dumps({**profile, "firstName": " "}),
+            content_type="application/json",
+            HTTP_X_CSRFTOKEN=self.csrf_token,
+        )
+        self.assertEqual(invalid_response.status_code, 400)
+
+        csrf_response = self.client.patch(
+            "/api/investor/profile/",
+            data=json.dumps(profile),
+            content_type="application/json",
+            HTTP_X_CSRFTOKEN="invalid-token",
+        )
+        self.assertEqual(csrf_response.status_code, 403)
+
     def test_student_can_read_and_update_their_profile(self):
         student = self.create_user()
         student.role = User.Role.STUDENT
@@ -258,3 +357,124 @@ class AuthApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Si un compte correspond", response.json()["detail"])
         self.assertEqual(len(mail.outbox), 0)
+
+
+class AdminOverviewApiTests(TestCase):
+    def create_user(self, email, role):
+        return User.objects.create_user(
+            username=email,
+            email=email,
+            password="Secure!Guinea42",
+            role=role,
+        )
+
+    def test_admin_overview_requires_admin_role(self):
+        self.assertEqual(self.client.get("/api/admin/overview/").status_code, 401)
+
+        student = self.create_user("student@example.com", User.Role.STUDENT)
+        self.client.force_login(student)
+        response = self.client.get("/api/admin/overview/")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_overview_returns_real_counts_and_role_distribution(self):
+        admin = self.create_user("admin@example.com", User.Role.ADMIN)
+        student = self.create_user("student@example.com", User.Role.STUDENT)
+        entrepreneur = self.create_user(
+            "entrepreneur@example.com",
+            User.Role.ENTREPRENEUR,
+        )
+        EntrepreneurProject.objects.create(
+            owner=entrepreneur,
+            title="Projet publié",
+            description="Une description détaillée du projet publié.",
+            sector="Agriculture",
+            region="Kindia",
+            funding_goal=100_000_000,
+            stage=EntrepreneurProject.Stage.PROTOTYPE,
+            status=EntrepreneurProject.Status.PUBLISHED,
+            visibility=EntrepreneurProject.Visibility.PUBLIC,
+        )
+        EntrepreneurProject.objects.create(
+            owner=entrepreneur,
+            title="Projet restreint",
+            description="Un projet publié mais non accessible publiquement.",
+            sector="Agriculture",
+            region="Kindia",
+            funding_goal=100_000_000,
+            stage=EntrepreneurProject.Stage.PROTOTYPE,
+            status=EntrepreneurProject.Status.PUBLISHED,
+            visibility=EntrepreneurProject.Visibility.RESTRICTED,
+        )
+        Organization.objects.create(
+            legal_name="Organisation de test",
+            organization_type="COMPANY",
+            created_by=entrepreneur,
+        )
+        self.client.force_login(admin)
+
+        response = self.client.get("/api/admin/overview/")
+        payload = response.json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["totalUsers"], 3)
+        self.assertEqual(payload["publishedProjects"], 1)
+        self.assertEqual(payload["organizations"], 1)
+        role_counts = {item["role"]: item["count"] for item in payload["roles"]}
+        self.assertEqual(role_counts[User.Role.ADMIN], 1)
+        self.assertEqual(role_counts[User.Role.STUDENT], 1)
+        self.assertEqual(role_counts[User.Role.ENTREPRENEUR], 1)
+
+    def test_admin_users_requires_admin_role(self):
+        self.assertEqual(self.client.get("/api/admin/users/").status_code, 401)
+
+        student = self.create_user("student@example.com", User.Role.STUDENT)
+        self.client.force_login(student)
+        response = self.client.get("/api/admin/users/")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_users_search_filters_status_and_pagination(self):
+        admin = self.create_user("admin@example.com", User.Role.ADMIN)
+        active_student = self.create_user(
+            "fatoumata@example.com",
+            User.Role.STUDENT,
+        )
+        inactive_student = self.create_user(
+            "ibrahima@example.com",
+            User.Role.STUDENT,
+        )
+        inactive_student.is_active = False
+        inactive_student.save(update_fields=["is_active"])
+        self.create_user("founder@example.com", User.Role.ENTREPRENEUR)
+        self.client.force_login(admin)
+
+        active_students = self.client.get(
+            "/api/admin/users/?role=STUDENT&status=active&page=1&pageSize=1"
+        )
+        inactive_students = self.client.get(
+            "/api/admin/users/?role=STUDENT&status=inactive"
+        )
+        searched = self.client.get("/api/admin/users/?q=fatoumata")
+
+        self.assertEqual(active_students.status_code, 200)
+        self.assertEqual(active_students.json()["pagination"]["totalResults"], 1)
+        self.assertEqual(active_students.json()["users"][0]["id"], active_student.pk)
+        self.assertTrue(active_students.json()["users"][0]["isActive"])
+        self.assertEqual(inactive_students.json()["pagination"]["totalResults"], 1)
+        self.assertEqual(inactive_students.json()["users"][0]["id"], inactive_student.pk)
+        self.assertEqual(searched.json()["users"][0]["id"], active_student.pk)
+
+    def test_admin_users_rejects_invalid_filters_and_pagination(self):
+        admin = self.create_user("admin@example.com", User.Role.ADMIN)
+        self.client.force_login(admin)
+
+        invalid_role = self.client.get("/api/admin/users/?role=UNKNOWN")
+        invalid_status = self.client.get("/api/admin/users/?status=unknown")
+        invalid_page = self.client.get("/api/admin/users/?page=0")
+        invalid_size = self.client.get("/api/admin/users/?pageSize=101")
+
+        self.assertEqual(invalid_role.status_code, 400)
+        self.assertEqual(invalid_status.status_code, 400)
+        self.assertEqual(invalid_page.status_code, 400)
+        self.assertEqual(invalid_size.status_code, 400)

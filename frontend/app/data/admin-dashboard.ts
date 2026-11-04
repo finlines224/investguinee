@@ -15,14 +15,6 @@ export type DemoActivity = {
   kind: "user" | "project" | "access" | "payment" | "message";
 };
 
-export type DemoAccessRequest = {
-  id: number;
-  name: string;
-  reason: string;
-  age: string;
-  initials: string;
-};
-
 export type RoleDistribution = {
   name: string;
   value: number;
@@ -89,12 +81,6 @@ export const demoActivities: DemoActivity[] = [
   { id: 3, title: "Demande d'accès approuvée", description: "Demande d'accès traitée par un administrateur", time: "Il y a 1 h", kind: "access" },
   { id: 4, title: "Paiement confirmé", description: "Abonnement Premium confirmé", time: "Il y a 2 h", kind: "payment" },
   { id: 5, title: "Nouveau message", description: "Nouveau message reçu", time: "Il y a 3 h", kind: "message" },
-];
-
-export const demoAccessRequests: DemoAccessRequest[] = [
-  { id: 101, name: "Fatoumata Bah", reason: "Accès à un projet sensible", age: "Il y a 1 h", initials: "FB" },
-  { id: 102, name: "Ibrahima Camara", reason: "Accès partenaire", age: "Il y a 2 h", initials: "IC" },
-  { id: 103, name: "Aminata Keita", reason: "Accès à la base de données", age: "Il y a 3 h", initials: "AK" },
 ];
 
 export const roleDistribution: RoleDistribution[] = [

@@ -395,3 +395,77 @@ class StudentFavoriteApiTests(TestCase):
         )
         self.assertEqual(invalid_csrf_response.status_code, 403)
         self.assertFalse(Favorite.objects.filter(user=self.student).exists())
+
+
+class AdminProjectApiTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="admin@example.com",
+            email="admin@example.com",
+            password="Secure!Guinea42",
+            role=User.Role.ADMIN,
+        )
+        self.owner = User.objects.create_user(
+            username="founder@example.com",
+            email="founder@example.com",
+            first_name="Aminata",
+            last_name="Bah",
+            password="Secure!Guinea42",
+            role=User.Role.ENTREPRENEUR,
+        )
+
+    def create_project(self, **overrides):
+        fields = {
+            "owner": self.owner,
+            "title": "Projet agricole durable",
+            "description": "Un projet détaillé de production agricole durable.",
+            "sector": "Agriculture",
+            "region": "Kindia",
+            "funding_goal": 120_000_000,
+            "stage": EntrepreneurProject.Stage.PROTOTYPE,
+            "status": EntrepreneurProject.Status.SUBMITTED,
+        }
+        fields.update(overrides)
+        return EntrepreneurProject.objects.create(**fields)
+
+    def test_admin_project_catalog_requires_admin_role(self):
+        self.assertEqual(self.client.get("/api/admin/projects/").status_code, 401)
+
+        self.client.force_login(self.owner)
+        response = self.client.get("/api/admin/projects/")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_project_catalog_searches_filters_and_paginates(self):
+        matching = self.create_project()
+        self.create_project(
+            title="Projet énergie",
+            sector="Énergie",
+            status=EntrepreneurProject.Status.PUBLISHED,
+        )
+        self.client.force_login(self.admin)
+
+        filtered = self.client.get(
+            "/api/admin/projects/?status=SUBMITTED&sector=Agriculture&page=1&pageSize=1"
+        )
+        searched = self.client.get("/api/admin/projects/?q=Projet%20agricole%20durable")
+        payload = filtered.json()
+
+        self.assertEqual(filtered.status_code, 200)
+        self.assertEqual(payload["pagination"]["totalResults"], 1)
+        self.assertEqual(payload["projects"][0]["id"], matching.pk)
+        self.assertEqual(payload["projects"][0]["owner"], "Aminata Bah")
+        self.assertEqual(searched.json()["projects"][0]["id"], matching.pk)
+
+    def test_admin_project_catalog_rejects_invalid_filters_and_pagination(self):
+        self.client.force_login(self.admin)
+
+        invalid_status = self.client.get("/api/admin/projects/?status=UNKNOWN")
+        invalid_sector = self.client.get("/api/admin/projects/?sector=UNKNOWN")
+        invalid_page = self.client.get("/api/admin/projects/?page=0")
+        invalid_page_size = self.client.get("/api/admin/projects/?pageSize=101")
+
+        self.assertEqual(invalid_status.status_code, 400)
+        self.assertEqual(invalid_sector.status_code, 400)
+        self.assertEqual(invalid_page.status_code, 400)
+        self.assertEqual(invalid_page_size.status_code, 400)

@@ -9,6 +9,7 @@ from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_GET, require_http_methods
 
+from access_requests.models import ProjectAccessRequest
 from .models import EntrepreneurProject, Favorite
 
 SECTORS = {
@@ -255,7 +256,9 @@ def public_projects(request):
 
 @require_GET
 def public_project_detail(request, slug):
-    projects = _public_projects_queryset()
+    projects = EntrepreneurProject.objects.filter(
+        status=EntrepreneurProject.Status.PUBLISHED,
+    ).select_related("owner", "organization")
     project = projects.filter(slug=slug).first()
     if project is None and slug.startswith("projet-"):
         project_id = slug.removeprefix("projet-")
@@ -265,6 +268,17 @@ def public_project_detail(request, slug):
                 project = projects.filter(pk=project_id, slug="").first()
     if project is None:
         return JsonResponse({"detail": "Ce projet est introuvable."}, status=404)
+    if project.visibility != EntrepreneurProject.Visibility.PUBLIC:
+        if (
+            not request.user.is_authenticated
+            or request.user.role != User.Role.INVESTOR
+            or not ProjectAccessRequest.objects.filter(
+                project=project,
+                investor=request.user,
+                status=ProjectAccessRequest.Status.APPROVED,
+            ).exists()
+        ):
+            return JsonResponse({"detail": "Ce projet est introuvable."}, status=404)
     return JsonResponse({"project": _public_project_payload(project)})
 
 

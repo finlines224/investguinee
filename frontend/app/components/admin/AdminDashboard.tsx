@@ -22,7 +22,6 @@ import {
   LogOut,
   Menu,
   MessageSquareText,
-  MoreHorizontal,
   Search,
   Settings,
   ShieldCheck,
@@ -45,18 +44,24 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import AdminTrainingManagement from "./AdminTrainingManagement";
+import AdminUserManagement from "./AdminUserManagement";
+import AdminProjectManagement from "./AdminProjectManagement";
+import AdminOrganizationManagement from "./AdminOrganizationManagement";
+import AdminAccessRequestManagement from "./AdminAccessRequestManagement";
+import AdminPendingAccessRequests from "./AdminPendingAccessRequests";
+import AppointmentManagement from "../appointments/AppointmentManagement";
+import AdminConversationManagement from "./AdminConversationManagement";
+import AdminNotificationManagement from "./AdminNotificationManagement";
 import {
-  adminDemoNotice,
   adminSearchRecords,
-  adminStats,
-  demoAccessRequests,
   demoActivities,
   platformSeries,
-  roleDistribution,
   type AdminPeriod,
   type AdminSearchRecord,
   type DemoActivity,
 } from "../../data/admin-dashboard";
+import { getAdminOverview, type AdminOverview, type AdminRole } from "../../lib/admin-api";
 import { postAuthRequest } from "../../lib/auth-api";
 import { getCurrentUser, type AuthenticatedUser } from "../../lib/session-api";
 
@@ -81,16 +86,16 @@ type AdminDialog = {
   confirmLabel?: string;
 };
 
-const adminNavigation: { id: AdminSection; label: string; icon: LucideIcon; badge?: number }[] = [
+const adminNavigation: { id: AdminSection; label: string; icon: LucideIcon }[] = [
   { id: "overview", label: "Tableau de bord", icon: LayoutDashboard },
-  { id: "users", label: "Utilisateurs", icon: UsersRound, badge: 12 },
+  { id: "users", label: "Utilisateurs", icon: UsersRound },
   { id: "organizations", label: "Entreprises & Organisations", icon: Building2 },
   { id: "projects", label: "Projets", icon: BriefcaseBusiness },
-  { id: "access-requests", label: "Demandes d'accès", icon: Clock3, badge: 8 },
+  { id: "access-requests", label: "Demandes d'accès", icon: Clock3 },
   { id: "trainings", label: "Formations & Événements", icon: GraduationCap },
   { id: "appointments", label: "Rendez-vous", icon: CalendarDays },
-  { id: "messages", label: "Messages", icon: MessageSquareText, badge: 5 },
-  { id: "notifications", label: "Notifications", icon: Bell, badge: 7 },
+  { id: "messages", label: "Messages", icon: MessageSquareText },
+  { id: "notifications", label: "Notifications", icon: Bell },
   { id: "payments", label: "Abonnements & Paiements", icon: CircleDollarSign },
   { id: "reports", label: "Rapports & Analyses", icon: FileChartColumnIncreasing },
   { id: "settings", label: "Paramètres", icon: Settings },
@@ -98,14 +103,14 @@ const adminNavigation: { id: AdminSection; label: string; icon: LucideIcon; badg
 ];
 
 const sectionCopy: Record<Exclude<AdminSection, "overview">, { title: string; description: string }> = {
-  users: { title: "Gestion des utilisateurs", description: "La liste, les filtres et les opérations sur les comptes seront activés avec une API admin autorisée." },
-  organizations: { title: "Entreprises & Organisations", description: "La vérification des organisations nécessite une API Django dédiée et une journalisation côté serveur." },
-  projects: { title: "Gestion des projets", description: "La consultation et la modération des projets ne sont pas encore reliées à une API admin." },
-  "access-requests": { title: "Demandes d'accès", description: "Les demandes illustrées sur le tableau de bord sont des données de démonstration. Aucune décision ne peut être enregistrée pour le moment." },
-  trainings: { title: "Formations & Événements", description: "La gestion des formations nécessite une API d'administration qui n'est pas encore présente." },
-  appointments: { title: "Rendez-vous", description: "Aucun endpoint de gestion des rendez-vous n'est configuré dans le backend actuel." },
-  messages: { title: "Messages", description: "Les messages d'administration apparaîtront ici lorsque l'API correspondante sera disponible." },
-  notifications: { title: "Notifications", description: "Les notifications affichées sont des exemples et ne proviennent pas d'un journal serveur." },
+  users: { title: "Gestion des utilisateurs", description: "Consultez les comptes enregistrés et filtrez par rôle ou statut." },
+  organizations: { title: "Entreprises & Organisations", description: "Consultez les organisations enregistrées et leur statut de vérification." },
+  projects: { title: "Gestion des projets", description: "Consultez les projets enregistrés, leur statut et les informations publiées par leur porteur." },
+  "access-requests": { title: "Demandes d'accès", description: "Consultez les demandes d’accès réelles et enregistrez une décision d’approbation ou de refus." },
+  trainings: { title: "Formations & Événements", description: "Créez, modifiez et publiez les ressources proposées dans l’espace étudiant." },
+  appointments: { title: "Rendez-vous", description: "Consultez les demandes et les créneaux proposés sur la plateforme." },
+  messages: { title: "Messages", description: "Consultez les métadonnées des conversations privées entre investisseurs et entrepreneurs." },
+  notifications: { title: "Notifications", description: "Consultez les alertes et diffusez des annonces aux comptes actifs." },
   payments: { title: "Abonnements & Paiements", description: "Les données de paiement ne sont pas chargées depuis le backend; aucune information financière réelle n'est affichée." },
   reports: { title: "Rapports & Analyses", description: "Les rapports de production devront être calculés à partir des données persistantes et des autorisations Django." },
   settings: { title: "Paramètres", description: "Les réglages administratifs ne sont pas encore connectés à des endpoints sécurisés." },
@@ -142,6 +147,45 @@ const periodLabels: Record<AdminPeriod, string> = {
   "12m": "12 derniers mois",
 };
 
+const adminRoleColors: Record<AdminRole["role"], string> = {
+  INVESTOR: "#0875FF",
+  ENTREPRENEUR: "#00A66A",
+  STUDENT: "#7038E8",
+  ADMIN: "#FFA500",
+};
+
+const adminOverviewCards: {
+  label: string;
+  color: string;
+  icon: LucideIcon;
+  getValue: (overview: AdminOverview) => number;
+  description: string;
+}[] = [
+  {
+    label: "Utilisateurs inscrits",
+    color: "blue",
+    icon: UsersRound,
+    getValue: (overview) => overview.totalUsers,
+    description: "Comptes enregistrés",
+  },
+  {
+    label: "Projets publiés",
+    color: "violet",
+    icon: BriefcaseBusiness,
+    getValue: (overview) => overview.publishedProjects,
+    description: "Projets publics publiés",
+  },
+  {
+    label: "Entreprises",
+    color: "green",
+    icon: Building2,
+    getValue: (overview) => overview.organizations,
+    description: "Organisations enregistrées",
+  },
+];
+
+const adminCountFormatter = new Intl.NumberFormat("fr-FR");
+
 function getRoleDestination(user: AuthenticatedUser) {
   if (user.role === "STUDENT") return "/espace-etudiant";
   if (user.role === "INVESTOR") return "/espace-investisseur";
@@ -159,6 +203,10 @@ export default function AdminDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [logoutError, setLogoutError] = useState("");
+  const [overview, setOverview] = useState<AdminOverview | null>(null);
+  const [overviewLoading, setOverviewLoading] = useState(true);
+  const [overviewError, setOverviewError] = useState("");
+  const [overviewRetryCount, setOverviewRetryCount] = useState(0);
   const [activeSection, setActiveSection] = useState<AdminSection>("overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -194,6 +242,36 @@ export default function AdminDashboard() {
     return () => window.clearTimeout(timer);
   }, [loadSession]);
 
+  const adminUserId = user?.id;
+  useEffect(() => {
+    if (adminUserId === undefined) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setOverviewLoading(true);
+      setOverviewError("");
+      void getAdminOverview(controller.signal)
+        .then((data) => {
+          if (!controller.signal.aborted) setOverview(data);
+        })
+        .catch((error: unknown) => {
+          if (!controller.signal.aborted) {
+            setOverviewError(
+              error instanceof Error
+                ? error.message
+                : "Impossible de charger les indicateurs administrateur.",
+            );
+          }
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setOverviewLoading(false);
+        });
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [adminUserId, overviewRetryCount]);
+
   const searchResults = useMemo(() => {
     const normalized = search.trim().toLocaleLowerCase("fr");
     if (!normalized) return [];
@@ -225,16 +303,6 @@ export default function AdminDashboard() {
     setSearch("");
   };
 
-  const showUnavailableAction = (title: string, subject?: string) => {
-    setDialog({
-      title,
-      message: subject
-        ? `« ${subject} » provient du jeu de données de démonstration. Le backend ne fournit pas d'API administrative pour cette action; aucune décision n'a été enregistrée.`
-        : "Cette rubrique n'est pas encore reliée à l'API Django. Aucune donnée ni opération réelle n'est simulée.",
-      confirmLabel: "Compris",
-    });
-  };
-
   if (isLoading) {
     return <main className="admin-state"><span className="admin-spinner" /><p>Vérification de votre session administrateur…</p></main>;
   }
@@ -261,7 +329,7 @@ export default function AdminDashboard() {
         </Link>
         <span className="admin-sidebar__section-label">ESPACE ADMINISTRATION</span>
         <nav className="admin-nav" aria-label="Navigation administrateur">
-          {adminNavigation.map(({ id, label, icon: Icon, badge }) => (
+          {adminNavigation.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               type="button"
@@ -271,7 +339,6 @@ export default function AdminDashboard() {
             >
               <Icon size={18} strokeWidth={1.8} aria-hidden="true" />
               <span>{label}</span>
-              {badge !== undefined && <span className="admin-nav__badge">{badge}</span>}
             </button>
           ))}
         </nav>
@@ -325,25 +392,80 @@ export default function AdminDashboard() {
         <main className="admin-content">
           {activeSection === "overview" ? (
             <>
-              <AdminWelcome onStatusClick={() => setDialog({ title: "État de la plateforme", message: "Cet indicateur est une démonstration visuelle. Aucun service de supervision n'est connecté.", confirmLabel: "Compris" })} />
-              <div className="admin-demo-notice"><Activity size={15} /><span>{adminDemoNotice}</span></div>
+              <AdminWelcome
+                isConnected={overview !== null && !overviewError}
+                isLoading={overviewLoading}
+                onStatusClick={() =>
+                  setDialog({
+                    title: "État des données administrateur",
+                    message: overviewError
+                      ? overviewError
+                      : overview
+                        ? "Les indicateurs et les demandes d’accès sont chargés depuis l’API Django. Le graphique d’évolution et les activités récentes restent des exemples de démonstration."
+                        : "Les indicateurs sont en cours de chargement depuis l’API Django.",
+                    confirmLabel: "Compris",
+                  })
+                }
+              />
+              <div className="admin-demo-notice">
+                <Activity size={15} />
+                <span>
+                  Les indicateurs et la répartition des rôles proviennent de la base de données.
+                  Les demandes d’accès sont synchronisées; le graphique d’évolution et les activités restent des exemples.
+                </span>
+              </div>
+              {overviewError && (
+                <div className="admin-overview-error" role="alert">
+                  <span>{overviewError}</span>
+                  <button
+                    className="admin-button admin-button--quiet"
+                    type="button"
+                    onClick={() => setOverviewRetryCount((count) => count + 1)}
+                  >
+                    Réessayer
+                  </button>
+                </div>
+              )}
               <section className="admin-stats" aria-label="Indicateurs clés">
-                {adminStats.map((stat) => <AdminStatCard key={stat.label} stat={stat} />)}
+                {adminOverviewCards.map((card) => (
+                  <AdminStatCard
+                    key={card.label}
+                    card={card}
+                    value={overview ? adminCountFormatter.format(card.getValue(overview)) : null}
+                    loading={overviewLoading}
+                  />
+                ))}
               </section>
               <div className="admin-overview-grid">
                 <PlatformChart period={period} onPeriodChange={setPeriod} />
                 <RecentActivity onViewAll={() => setActiveSection("audit")} />
               </div>
               <div className="admin-lower-grid">
-                <PendingRequests onAction={showUnavailableAction} onViewAll={() => setActiveSection("access-requests")} />
-                <RoleChart />
+                <AdminPendingAccessRequests onViewAll={() => setActiveSection("access-requests")} />
+                <RoleChart overview={overview} />
                 <QuickActions onSelect={setActiveSection} />
               </div>
             </>
+          ) : activeSection === "users" ? (
+            <AdminUserManagement />
+          ) : activeSection === "projects" ? (
+            <AdminProjectManagement />
+          ) : activeSection === "organizations" ? (
+            <AdminOrganizationManagement />
+          ) : activeSection === "trainings" ? (
+            <AdminTrainingManagement />
+          ) : activeSection === "access-requests" ? (
+            <AdminAccessRequestManagement />
+          ) : activeSection === "appointments" ? (
+            <AppointmentManagement role="admin" />
+          ) : activeSection === "messages" ? (
+            <AdminConversationManagement />
+          ) : activeSection === "notifications" ? (
+            <AdminNotificationManagement />
           ) : (
             <AdminSectionPlaceholder section={activeSection} onBack={() => setActiveSection("overview")} />
           )}
-          <footer className="admin-content__footer"><span>InvestGuinée · Administration</span><span>Interface de démonstration · {new Date().getFullYear()}</span></footer>
+          <footer className="admin-content__footer"><span>InvestGuinée · Administration</span><span>{new Date().getFullYear()}</span></footer>
         </main>
       </div>
 
@@ -352,28 +474,42 @@ export default function AdminDashboard() {
   );
 }
 
-function AdminWelcome({ onStatusClick }: { onStatusClick: () => void }) {
+function AdminWelcome({
+  isConnected,
+  isLoading,
+  onStatusClick,
+}: {
+  isConnected: boolean;
+  isLoading: boolean;
+  onStatusClick: () => void;
+}) {
+  const statusLabel = isLoading
+    ? "Synchronisation des données…"
+    : isConnected
+      ? "Données Django connectées"
+      : "Données indisponibles";
   return (
     <section className="admin-welcome">
       <div className="admin-welcome__copy"><span>INVESTGUINÉE · VUE ADMINISTRATEUR</span><h1>Tableau de bord Administrateur</h1><p>Gérez, supervisez et faites grandir la plateforme InvestGuinée.</p></div>
-      <div className="admin-system-card"><span className="admin-system-card__icon"><Check size={17} /></span><span className="admin-system-card__copy"><strong>Système opérationnel</strong><small>Indicateur de démonstration</small></span><button type="button" onClick={onStatusClick}>Voir le détail <ChevronRight size={14} /></button></div>
+      <div className="admin-system-card"><span className="admin-system-card__icon">{isConnected ? <Check size={17} /> : <Activity size={17} />}</span><span className="admin-system-card__copy"><strong>{statusLabel}</strong><small>Statistiques des comptes, projets et organisations</small></span><button type="button" onClick={onStatusClick}>Voir le détail <ChevronRight size={14} /></button></div>
     </section>
   );
 }
 
-function AdminStatCard({ stat }: { stat: (typeof adminStats)[number] }) {
-  const iconMap: Record<(typeof adminStats)[number]["icon"], LucideIcon> = {
-    users: UsersRound,
-    projects: BriefcaseBusiness,
-    buildings: Building2,
-    calendar: CalendarDays,
-    transactions: CircleDollarSign,
-  };
-  const Icon = iconMap[stat.icon];
+function AdminStatCard({
+  card,
+  value,
+  loading,
+}: {
+  card: (typeof adminOverviewCards)[number];
+  value: string | null;
+  loading: boolean;
+}) {
+  const Icon = card.icon;
   return (
-    <article className={`admin-stat-card admin-stat-card--${stat.color}`}>
-      <div className="admin-stat-card__top"><span className="admin-stat-card__icon"><Icon size={19} strokeWidth={1.9} /></span><span className="admin-stat-card__change"><ArrowUpRight size={14} />{stat.change}</span></div>
-      <p>{stat.label}</p><strong>{stat.value}</strong><small>vs période précédente <span>· démo</span></small>
+    <article className={`admin-stat-card admin-stat-card--${card.color}`}>
+      <div className="admin-stat-card__top"><span className="admin-stat-card__icon"><Icon size={19} strokeWidth={1.9} /></span></div>
+      <p>{card.label}</p><strong>{value ?? (loading ? "…" : "—")}</strong><small>{card.description}</small>
     </article>
   );
 }
@@ -410,20 +546,23 @@ function RecentActivity({ onViewAll }: { onViewAll: () => void }) {
   );
 }
 
-function PendingRequests({ onAction, onViewAll }: { onAction: (title: string, subject?: string) => void; onViewAll: () => void }) {
-  return (
-    <section className="admin-card admin-requests-card">
-      <div className="admin-card__heading"><div className="admin-card__title"><span className="admin-card__title-icon admin-card__title-icon--orange"><Clock3 size={18} /></span><span><h2>Demandes en attente</h2><small>Exemples non connectés au backend</small></span></div><button className="admin-text-button" type="button" onClick={onViewAll}>Voir toutes <ArrowUpRight size={14} /></button></div>
-      <div className="admin-request-list">{demoAccessRequests.map((request) => <article className="admin-request" key={request.id}><span className="admin-request__avatar">{request.initials}</span><span className="admin-request__person"><strong>{request.name}</strong><small>{request.reason}</small><em><span />En attente · {request.age}</em></span><div className="admin-request__actions"><button className="admin-request__approve" type="button" onClick={() => onAction("Approbation non disponible", request.name)} aria-label={`Voir l'état de démonstration pour ${request.name}`}><Check size={16} /><span>Approuver</span></button><button className="admin-request__reject" type="button" onClick={() => onAction("Refus non disponible", request.name)} aria-label={`Voir l'état de démonstration pour ${request.name}`}><X size={16} /><span>Refuser</span></button></div></article>)}</div>
-    </section>
-  );
-}
+function RoleChart({ overview }: { overview: AdminOverview | null }) {
+  const roles =
+    overview?.roles.map((role) => ({
+      ...role,
+      percentage: overview.totalUsers
+        ? Math.round((role.count / overview.totalUsers) * 100)
+        : 0,
+      color: adminRoleColors[role.role],
+    })) ?? [];
+  const roleDescription = overview
+    ? roles.map((role) => `${role.label} ${role.percentage} %`).join(", ")
+    : "Chargement de la répartition des rôles";
 
-function RoleChart() {
   return (
     <section className="admin-card admin-role-card">
-      <div className="admin-card__heading"><div className="admin-card__title"><span className="admin-card__title-icon admin-card__title-icon--violet"><ChartPie size={18} /></span><span><h2>Répartition par rôle</h2><small>Répartition de démonstration</small></span></div><button className="admin-more-button" type="button" aria-label="Informations sur le graphique" title="Données de démonstration"><MoreHorizontal size={19} /></button></div>
-      <div className="admin-role-card__content"><div className="admin-donut-wrap" role="img" aria-label="Répartition de démonstration : investisseurs 32 %, entrepreneurs 40 %, étudiants 18 %, administrateurs 10 %"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={roleDistribution} dataKey="value" nameKey="name" innerRadius="68%" outerRadius="92%" paddingAngle={3} stroke="none">{roleDistribution.map((role) => <Cell key={role.name} fill={role.color} />)}</Pie><Tooltip formatter={(value) => [`${value}%`, "Part"]} /></PieChart></ResponsiveContainer><span className="admin-donut-center"><strong>12 480</strong><small>utilisateurs</small></span></div><ul className="admin-role-legend">{roleDistribution.map((role) => <li key={role.name}><span><i style={{ backgroundColor: role.color }} />{role.name}</span><strong>{role.value}%</strong></li>)}</ul></div>
+      <div className="admin-card__heading"><div className="admin-card__title"><span className="admin-card__title-icon admin-card__title-icon--violet"><ChartPie size={18} /></span><span><h2>Répartition par rôle</h2><small>Comptes enregistrés par rôle</small></span></div></div>
+      <div className="admin-role-card__content"><div className="admin-donut-wrap" role="img" aria-label={roleDescription}><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={roles} dataKey="count" nameKey="label" innerRadius="68%" outerRadius="92%" paddingAngle={3} stroke="none">{roles.map((role) => <Cell key={role.role} fill={role.color} />)}</Pie><Tooltip formatter={(value) => [adminCountFormatter.format(Number(value ?? 0)), "Comptes"]} /></PieChart></ResponsiveContainer><span className="admin-donut-center"><strong>{overview ? adminCountFormatter.format(overview.totalUsers) : "—"}</strong><small>utilisateurs</small></span></div><ul className="admin-role-legend">{roles.map((role) => <li key={role.role}><span><i style={{ backgroundColor: role.color }} />{role.label}</span><strong>{role.percentage}%</strong></li>)}</ul></div>
     </section>
   );
 }
@@ -441,6 +580,204 @@ function AdminSectionPlaceholder({ section, onBack }: { section: Exclude<AdminSe
   const { title, description } = sectionCopy[section];
   const navigationItem = adminNavigation.find((item) => item.id === section);
   const Icon = navigationItem?.icon ?? ShieldCheck;
+  if (section === "audit") {
+    return (
+      <section className="admin-section-placeholder admin-audit">
+        <div className="admin-section-placeholder__breadcrumb"><span>Administration</span><ChevronRight size={14} /><strong>{title}</strong></div>
+        <header className="admin-audit__hero">
+          <span className="admin-audit__hero-icon"><Icon size={25} /></span>
+          <div>
+            <span className="admin-audit__eyebrow">TRAÇABILITÉ & SÉCURITÉ</span>
+            <h1>{title}</h1>
+            <p>{description}</p>
+          </div>
+          <span className="admin-demo-chip">JOURNAL NON CONNECTÉ</span>
+        </header>
+        <div className="admin-audit__summary">
+          <article><span className="admin-audit__summary-icon admin-audit__summary-icon--blue"><Activity size={19} /></span><div><span>Événements journalisés</span><strong>Indisponible</strong></div></article>
+          <article><span className="admin-audit__summary-icon admin-audit__summary-icon--green"><Clock3 size={19} /></span><div><span>Dernière activité</span><strong>Non disponible</strong></div></article>
+          <article><span className="admin-audit__summary-icon admin-audit__summary-icon--violet"><ShieldCheck size={19} /></span><div><span>Journal d’audit</span><strong>Non connecté</strong></div></article>
+        </div>
+        <section className="admin-audit__panel">
+          <div className="admin-audit__panel-heading">
+            <div><h2>Historique des événements</h2><p>Actions administratives et événements de sécurité</p></div>
+            <span className="admin-audit__unavailable"><span />Données indisponibles</span>
+          </div>
+          <div className="admin-audit__table-wrap">
+            <table className="admin-audit__table">
+              <thead><tr><th>Date & heure</th><th>Acteur</th><th>Action</th><th>Ressource</th><th>Résultat</th></tr></thead>
+              <tbody><tr><td colSpan={5}>
+                <div className="admin-audit__empty">
+                  <span className="admin-audit__empty-icon"><Icon size={23} /></span>
+                  <strong>Aucun journal d’audit disponible</strong>
+                  <span>Les événements apparaîtront ici après la connexion d’une source de journalisation.</span>
+                </div>
+              </td></tr></tbody>
+            </table>
+          </div>
+        </section>
+        <div className="admin-audit__notice">
+          <ShieldCheck size={19} />
+          <p>Cette page n’affiche aucun événement fictif. La journalisation devra être configurée côté serveur afin d’assurer la traçabilité et la protection des données.</p>
+        </div>
+        <button className="admin-button admin-button--quiet" type="button" onClick={onBack}>Retour au tableau de bord</button>
+      </section>
+    );
+  }
+  if (section === "settings") {
+    return (
+      <section className="admin-section-placeholder admin-settings">
+        <div className="admin-section-placeholder__breadcrumb"><span>Administration</span><ChevronRight size={14} /><strong>{title}</strong></div>
+        <header className="admin-settings__hero">
+          <span className="admin-settings__hero-icon"><Icon size={25} /></span>
+          <div>
+            <span className="admin-settings__eyebrow">CONFIGURATION DE L’ESPACE</span>
+            <h1>{title}</h1>
+            <p>{description}</p>
+          </div>
+          <span className="admin-demo-chip">GESTION NON CONNECTÉE</span>
+        </header>
+        <div className="admin-settings__status">
+          <span className="admin-settings__status-icon"><ShieldCheck size={19} /></span>
+          <div><strong>Vos paramètres ne sont pas modifiables depuis cette page</strong><p>Les préférences et contrôles administrateur seront activés lorsqu’une API sécurisée sera disponible.</p></div>
+        </div>
+        <div className="admin-settings__grid">
+          <article className="admin-settings__card">
+            <span className="admin-settings__card-icon admin-settings__card-icon--blue"><Settings size={19} /></span>
+            <div className="admin-settings__card-heading"><h2>Préférences générales</h2><span>À configurer</span></div>
+            <p>Langue, fuseau horaire et préférences d’affichage de l’interface d’administration.</p>
+            <div className="admin-settings__card-footer"><span>Connexion API requise</span></div>
+          </article>
+          <article className="admin-settings__card">
+            <span className="admin-settings__card-icon admin-settings__card-icon--green"><ShieldCheck size={19} /></span>
+            <div className="admin-settings__card-heading"><h2>Sécurité & accès</h2><span>À configurer</span></div>
+            <p>Gestion des accès administrateur, des sessions et des paramètres de sécurité.</p>
+            <div className="admin-settings__card-footer"><span>Connexion API requise</span></div>
+          </article>
+          <article className="admin-settings__card">
+            <span className="admin-settings__card-icon admin-settings__card-icon--amber"><Bell size={19} /></span>
+            <div className="admin-settings__card-heading"><h2>Notifications</h2><span>À configurer</span></div>
+            <p>Choix des alertes administratives et des canaux de réception associés.</p>
+            <div className="admin-settings__card-footer"><span>Connexion API requise</span></div>
+          </article>
+          <article className="admin-settings__card">
+            <span className="admin-settings__card-icon admin-settings__card-icon--violet"><Activity size={19} /></span>
+            <div className="admin-settings__card-heading"><h2>Configuration de la plateforme</h2><span>À configurer</span></div>
+            <p>Paramètres généraux des services et des fonctionnalités de la plateforme.</p>
+            <div className="admin-settings__card-footer"><span>Connexion API requise</span></div>
+          </article>
+        </div>
+        <button className="admin-button admin-button--quiet" type="button" onClick={onBack}>Retour au tableau de bord</button>
+      </section>
+    );
+  }
+  if (section === "reports") {
+    return (
+      <section className="admin-section-placeholder admin-reports">
+        <div className="admin-section-placeholder__breadcrumb"><span>Administration</span><ChevronRight size={14} /><strong>{title}</strong></div>
+        <header className="admin-reports__hero">
+          <span className="admin-reports__hero-icon"><Icon size={25} /></span>
+          <div>
+            <span className="admin-reports__eyebrow">PILOTAGE DE LA PLATEFORME</span>
+            <h1>{title}</h1>
+            <p>{description}</p>
+          </div>
+          <span className="admin-demo-chip">DONNÉES ANALYTIQUES NON CONNECTÉES</span>
+        </header>
+        <div className="admin-reports__metrics">
+          <article className="admin-reports__metric">
+            <span className="admin-reports__metric-icon admin-reports__metric-icon--blue"><UsersRound size={19} /></span>
+            <div><span>Comptes inscrits</span><strong>—</strong><small>Indicateur non calculé</small></div>
+          </article>
+          <article className="admin-reports__metric">
+            <span className="admin-reports__metric-icon admin-reports__metric-icon--green"><BriefcaseBusiness size={19} /></span>
+            <div><span>Projets publiés</span><strong>—</strong><small>Indicateur non calculé</small></div>
+          </article>
+          <article className="admin-reports__metric">
+            <span className="admin-reports__metric-icon admin-reports__metric-icon--violet"><Activity size={19} /></span>
+            <div><span>Activité de la plateforme</span><strong>—</strong><small>Historique non disponible</small></div>
+          </article>
+        </div>
+        <div className="admin-reports__grid">
+          <section className="admin-reports__panel admin-reports__chart">
+            <div className="admin-reports__panel-heading">
+              <span className="admin-reports__panel-icon"><ChartLine size={18} /></span>
+              <div><h2>Évolution de la plateforme</h2><p>Comptes, projets et activités au fil du temps</p></div>
+            </div>
+            <div className="admin-reports__chart-empty">
+              <span className="admin-reports__chart-lines" aria-hidden="true"><i /><i /><i /><i /></span>
+              <span>Aucune série de données à afficher</span>
+            </div>
+          </section>
+          <section className="admin-reports__panel admin-reports__distribution">
+            <div className="admin-reports__panel-heading">
+              <span className="admin-reports__panel-icon admin-reports__panel-icon--violet"><ChartPie size={18} /></span>
+              <div><h2>Répartition des comptes</h2><p>Par type de profil</p></div>
+            </div>
+            <div className="admin-reports__distribution-empty">
+              <span className="admin-reports__donut-placeholder" aria-hidden="true"><i /></span>
+              <span>Les statistiques apparaîtront lorsque les rapports seront connectés.</span>
+            </div>
+          </section>
+        </div>
+        <div className="admin-reports__notice">
+          <ShieldCheck size={19} />
+          <p>
+            Les rapports affichés ici ne contiennent pas de données simulées.
+            Les indicateurs seront calculés depuis les données persistantes et
+            accessibles uniquement aux administrateurs autorisés.
+          </p>
+        </div>
+        <button className="admin-button admin-button--primary" type="button" onClick={onBack}>Retour au tableau de bord</button>
+      </section>
+    );
+  }
+  if (section === "payments") {
+    return (
+      <section className="admin-section-placeholder admin-payments">
+        <div className="admin-section-placeholder__breadcrumb"><span>Administration</span><ChevronRight size={14} /><strong>{title}</strong></div>
+        <header className="admin-payments__hero">
+          <span className="admin-payments__hero-icon"><Icon size={25} /></span>
+          <div>
+            <span className="admin-payments__eyebrow">SUIVI FINANCIER</span>
+            <h1>{title}</h1>
+            <p>{description}</p>
+          </div>
+          <span className="admin-demo-chip">API NON CONNECTÉE</span>
+        </header>
+        <div className="admin-payments__overview">
+          <article className="admin-payments__card">
+            <span className="admin-payments__card-icon admin-payments__card-icon--blue"><CircleDollarSign size={19} /></span>
+            <div><span>Paiements enregistrés</span><strong>Indisponible</strong><small>Aucune transaction réelle affichée</small></div>
+          </article>
+          <article className="admin-payments__card">
+            <span className="admin-payments__card-icon admin-payments__card-icon--green"><BriefcaseBusiness size={19} /></span>
+            <div><span>Abonnements actifs</span><strong>Indisponible</strong><small>Les offres ne sont pas reliées à l’API</small></div>
+          </article>
+          <article className="admin-payments__card">
+            <span className="admin-payments__card-icon admin-payments__card-icon--amber"><Clock3 size={19} /></span>
+            <div><span>Historique</span><strong>Non disponible</strong><small>En attente de connexion des données</small></div>
+          </article>
+        </div>
+        <section className="admin-payments__empty">
+          <span className="admin-payments__empty-icon"><Icon size={25} /></span>
+          <span className="admin-payments__eyebrow">AUCUNE DONNÉE FINANCIÈRE</span>
+          <h2>Les paiements et abonnements apparaîtront ici</h2>
+          <p>
+            Cette rubrique est uniquement informative pour le moment. Aucun
+            paiement n’a été effectué ni aucun abonnement créé depuis cet écran.
+            La gestion sera activée lorsque les données et les contrôles côté
+            serveur seront disponibles.
+          </p>
+          <div className="admin-section-placeholder__notice">
+            <ShieldCheck size={18} />
+            <span>Les opérations financières devront être sécurisées et vérifiées par l’API Django avant leur activation.</span>
+          </div>
+          <button className="admin-button admin-button--primary" type="button" onClick={onBack}>Retour au tableau de bord</button>
+        </section>
+      </section>
+    );
+  }
   return (
     <section className="admin-section-placeholder">
       <div className="admin-section-placeholder__breadcrumb"><span>Administration</span><ChevronRight size={14} /><strong>{title}</strong></div>

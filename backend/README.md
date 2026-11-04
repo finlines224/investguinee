@@ -42,6 +42,14 @@ transférées.
 
 - `GET /api/auth/csrf/` — initialise le cookie CSRF et fournit le jeton masqué.
 - `GET /api/auth/session/` — retourne le profil minimal de l'utilisateur connecté (401 si la session est absente).
+- `GET /api/investor/profile/` — retourne le profil de l’investisseur connecté.
+- `PATCH /api/investor/profile/` — modifie son prénom, son nom, son téléphone,
+  son type de profil et son secteur; session investisseur et jeton CSRF requis.
+  L’adresse e-mail reste en lecture seule.
+- `GET /api/investor/subscriptions/` — historique paginé en lecture seule,
+  réservé à l’investisseur connecté (`status`, `page`, `pageSize` facultatifs).
+  Les dossiers sont gérés dans l’administration Django; aucun paiement n’est
+  déclenché ni simulé.
 - `POST /api/auth/register/` — crée un compte après validation côté serveur.
 - `POST /api/auth/login/` — ouvre une session Django et retourne le rôle du compte pour orienter l'utilisateur vers son espace.
 - `POST /api/auth/logout/` — ferme la session.
@@ -69,3 +77,128 @@ facultatif.
   connectés. La recherche, le filtre `category`, la page `page` et la taille
   `pageSize` sont exécutés côté serveur.
 - Les inscriptions et le suivi de progression ne sont pas encore pris en charge.
+
+## Tableau de bord administrateur
+
+- `GET /api/admin/overview/` — réservé aux administrateurs connectés; renvoie
+  les totaux des comptes, des projets publics publiés et des organisations,
+  ainsi que le nombre de comptes par rôle.
+- `GET /api/admin/users/` — liste les comptes pour les administrateurs, avec
+  recherche `q`, filtres `role`/`status` et pagination. Les données de compte
+  sont exposées en lecture seule dans cette étape.
+- `GET /api/admin/projects/` — liste les projets pour les administrateurs,
+  avec recherche `q`, filtres `status`/`sector` et pagination. Les projets sont
+  consultables sans action de modération dans cette étape.
+- `GET /api/admin/organizations/` — liste les organisations pour les
+  administrateurs, avec recherche `q`, filtre `status` et pagination. Les
+  informations de vérification sont consultables sans décision de validation
+  dans cette étape.
+- `GET /api/admin/access-requests/` — liste les demandes d’accès aux projets,
+  avec recherche `q`, filtre `status` (`PENDING` par défaut) et pagination.
+- `PATCH /api/admin/access-requests/<id>/` — approuve ou refuse une demande
+  (`decision` et `reviewerNote`); réservé aux administrateurs et protégé par
+  jeton CSRF. Une demande traitée ne peut pas recevoir une seconde décision.
+- `GET /api/admin/trainings/` — liste les formations, y compris les brouillons,
+  avec recherche `q`, filtres `status`/`category` et pagination.
+- `POST /api/admin/trainings/create/` — crée une ressource (session admin et
+  jeton CSRF requis).
+- `PATCH /api/admin/trainings/<id>/` — modifie ou publie/dépublie une ressource
+  (session admin et jeton CSRF requis).
+
+## Demandes d’accès aux projets
+
+Un investisseur connecté peut parcourir les projets publiés en visibilité
+`MEMBERS_ONLY` ou `RESTRICTED` sans voir leur description, puis envoyer une
+justification de 10 à 2 000 caractères. Une seule demande en attente ou
+approuvée est possible par investisseur et projet; après un refus, une nouvelle
+demande peut être déposée.
+
+- `GET /api/investor/access-requests/projects/` — liste les projets restreints
+  et les statuts de demande de l’investisseur connecté, avec recherche `q` et
+  pagination.
+- `GET /api/investor/access-requests/` — liste les demandes de l’investisseur,
+  avec filtre `status` et pagination.
+- `POST /api/investor/access-requests/` — dépose une demande avec `projectId`
+  et `justification` (session investisseur et jeton CSRF requis).
+- `GET /api/projects/<slug>/` — retourne la fiche d’un projet public ou celle
+  d’un projet restreint uniquement à l’investisseur dont la demande est
+  approuvée. Les accès approuvés ne donnent pas accès aux autres rôles.
+
+## Rendez-vous investisseurs
+
+Un investisseur peut demander un rendez-vous avec le porteur d’un projet publié
+et accessible. Le créneau doit être futur, inclure son fuseau horaire, être
+proposé par intervalles de 30 minutes, respecter un préavis d’une heure et se
+situer dans les 90 jours. Les créneaux actifs d’un entrepreneur ne peuvent pas
+se chevaucher.
+
+- `GET /api/investor/appointments/` — liste les rendez-vous de l’investisseur,
+  avec recherche `q`, filtre `status` et pagination.
+- `POST /api/investor/appointments/` — demande un rendez-vous avec
+  `projectId`, `scheduledAt` et `message` (session investisseur et jeton CSRF
+  requis). Le motif doit contenir entre 10 et 2 000 caractères.
+- `PATCH /api/investor/appointments/<id>/` — annule une demande encore en
+  attente (`action: "cancel"`; session investisseur et jeton CSRF requis).
+- `GET /api/entrepreneur/appointments/` — liste les rendez-vous de
+  l’entrepreneur connecté, avec recherche, filtre et pagination.
+- `PATCH /api/entrepreneur/appointments/<id>/` — confirme ou refuse une demande
+  en attente (`decision`, `responseNote`; session entrepreneur et jeton CSRF
+  requis).
+- `GET /api/admin/appointments/` — permet aux administrateurs de consulter les
+  rendez-vous avec recherche, filtre et pagination; l’administration ne décide
+  pas à la place des participants.
+
+## Messagerie privée entre investisseurs et entrepreneurs
+
+Les conversations sont privées entre l’investisseur et le porteur d’un projet
+publié auquel l’investisseur a accès. Une même paire investisseur-projet ne
+crée qu’une conversation. Les administrateurs peuvent consulter les
+métadonnées et le nombre de messages, mais pas le contenu des échanges.
+
+- `GET /api/investor/conversations/` — liste les conversations de
+  l’investisseur connecté, avec recherche `q` et pagination.
+- `POST /api/investor/conversations/` — ouvre ou reprend la conversation du
+  projet avec `projectId` et envoie le premier message `body` (session
+  investisseur et jeton CSRF requis).
+- `GET /api/investor/conversations/<id>/messages/` et
+  `POST /api/investor/conversations/<id>/messages/` — lisent ou envoient les
+  messages d’une conversation appartenant à l’investisseur.
+- `GET /api/entrepreneur/conversations/` — liste les conversations de
+  l’entrepreneur connecté.
+- `GET /api/entrepreneur/conversations/<id>/messages/` et
+  `POST /api/entrepreneur/conversations/<id>/messages/` — lisent ou envoient
+  les messages d’une conversation appartenant à l’entrepreneur.
+- `POST /api/conversations/<id>/read/` — marque comme lus les messages reçus
+  par le participant connecté.
+- `GET /api/admin/conversations/` — expose uniquement les métadonnées des
+  conversations, avec recherche `q` et pagination; aucun contenu de message
+  n’est retourné.
+
+Les messages sont limités à 4 000 caractères. Les modifications requièrent un
+cookie de session et un jeton CSRF.
+
+## Notifications
+
+Les comptes connectés reçoivent des notifications lors d’un nouveau message,
+d’une demande ou réponse de rendez-vous, et d’une demande ou décision d’accès
+à un projet. Les administrateurs actifs reçoivent les nouvelles demandes
+d’accès. Les administrateurs peuvent envoyer une annonce à tous les comptes
+actifs; son texte et son lien sont également enregistrés dans l’historique.
+Les liens de notification et d’annonce sont des chemins internes à
+l’application.
+
+- `GET /api/notifications/` — liste les notifications du compte connecté, avec
+  recherche `q`, filtre `status` (`all`, `unread` ou `read`) et pagination.
+- `POST /api/notifications/` — marque toutes les notifications du compte
+  comme lues (`action: "mark_all_read"`).
+- `PATCH /api/notifications/<id>/` — marque comme lue une notification
+  appartenant au compte (`action: "mark_read"`).
+- `DELETE /api/notifications/<id>/` — supprime une notification appartenant au
+  compte.
+- `GET /api/admin/notification-broadcasts/` — consulte l’historique des
+  annonces, avec recherche et pagination.
+- `POST /api/admin/notification-broadcasts/` — diffuse une annonce aux comptes
+  actifs avec `title`, `body` et `targetUrl` (chemin interne facultatif).
+
+Les mutations requièrent une session et un jeton CSRF. Les comptes non
+administrateurs ne peuvent ni envoyer ni consulter les annonces globales.

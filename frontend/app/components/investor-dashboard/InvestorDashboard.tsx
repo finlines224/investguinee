@@ -7,38 +7,24 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { CatalogProject } from "../../data/project-catalog";
 import { postAuthRequest } from "../../lib/auth-api";
 import { getPublicProjects } from "../../lib/public-project-api";
+import { getInvestorAccessRequests } from "../../lib/investor-access-api";
+import {
+  getAppointmentCatalog,
+} from "../../lib/appointment-api";
+import { getConversations } from "../../lib/messaging-api";
+import { getNotifications, type NotificationRecord } from "../../lib/notification-api";
 import { getCurrentUser, type AuthenticatedUser } from "../../lib/session-api";
+import type { InvestorProfile } from "../../lib/investor-profile-api";
 import ProjectIcon from "../projects/ProjectIcon";
-import ProjectCard from "../projects/ProjectCard";
+import ProjectExplorer from "../projects/ProjectExplorer";
+import InvestorAccessRequests from "./InvestorAccessRequests";
+import InvestorProjects from "./InvestorProjects";
+import AppointmentManagement from "../appointments/AppointmentManagement";
+import ConversationWorkspace from "../messaging/ConversationWorkspace";
+import NotificationInbox from "../notifications/NotificationInbox";
+import InvestorProfileWorkspace from "./InvestorProfileWorkspace";
+import InvestorSubscriptionsWorkspace from "./InvestorSubscriptionsWorkspace";
 import { investorSections, type InvestorSection } from "./investor-sections";
-
-const chartPeriods = {
-  "7": {
-    labels: ["Lun.", "Mar.", "Mer.", "Jeu.", "Ven.", "Sam.", "Dim."],
-    visits: [18, 30, 25, 45, 37, 57, 48],
-    interactions: [8, 14, 11, 23, 18, 31, 26],
-  },
-  "30": {
-    labels: ["S1", "S2", "S3", "S4", "S5", "S6", "S7"],
-    visits: [22, 38, 31, 53, 42, 67, 59],
-    interactions: [9, 17, 15, 27, 21, 37, 30],
-  },
-  "90": {
-    labels: ["Juil.", "Août", "Sept.", "Oct.", "Nov.", "Déc.", "Janv."],
-    visits: [25, 36, 32, 54, 46, 70, 61],
-    interactions: [11, 18, 16, 29, 23, 39, 33],
-  },
-  "180": {
-    labels: ["Août", "Sept.", "Oct.", "Nov.", "Déc.", "Janv.", "Févr."],
-    visits: [19, 34, 29, 50, 44, 66, 60],
-    interactions: [8, 16, 13, 26, 22, 36, 32],
-  },
-  "365": {
-    labels: ["Mars", "Mai", "Juil.", "Sept.", "Nov.", "Janv.", "Mars"],
-    visits: [16, 29, 35, 48, 44, 64, 72],
-    interactions: [7, 13, 17, 24, 21, 35, 40],
-  },
-} as const;
 
 function DashboardIcon({
   name,
@@ -80,6 +66,16 @@ function getInitials(user: AuthenticatedUser) {
   return `${user.firstName[0] ?? ""}${user.lastName[0] ?? ""}`.toUpperCase() || "IG";
 }
 
+function formatActivityDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "Date indisponible"
+    : new Intl.DateTimeFormat("fr-FR", {
+        day: "2-digit",
+        month: "short",
+      }).format(date);
+}
+
 export default function InvestorDashboard({
   initialSection = "dashboard",
 }: {
@@ -98,7 +94,19 @@ export default function InvestorDashboard({
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [projectsError, setProjectsError] = useState("");
   const [favoriteNotice, setFavoriteNotice] = useState("");
-  const [chartPeriod, setChartPeriod] = useState<keyof typeof chartPeriods>("30");
+  const [accessRequestCount, setAccessRequestCount] = useState<number | null>(null);
+  const [accessRequestCountLoading, setAccessRequestCountLoading] = useState(true);
+  const [accessRequestCountError, setAccessRequestCountError] = useState("");
+  const [appointmentCount, setAppointmentCount] = useState<number | null>(null);
+  const [appointmentCountError, setAppointmentCountError] = useState("");
+  const [appointmentCountLoading, setAppointmentCountLoading] = useState(true);
+  const [conversationCount, setConversationCount] = useState<number | null>(null);
+  const [conversationCountError, setConversationCountError] = useState("");
+  const [conversationCountLoading, setConversationCountLoading] = useState(true);
+  const [recentNotifications, setRecentNotifications] = useState<NotificationRecord[]>([]);
+  const [activityError, setActivityError] = useState("");
+  const [activityLoading, setActivityLoading] = useState(true);
+  const [activityRetry, setActivityRetry] = useState(0);
   const section = initialSection;
 
   useEffect(() => {
@@ -155,6 +163,106 @@ export default function InvestorDashboard({
     const timer = window.setTimeout(() => void loadSession(), 0);
     return () => window.clearTimeout(timer);
   }, [loadSession]);
+
+  useEffect(() => {
+    if (!user) return;
+    const controller = new AbortController();
+    void getInvestorAccessRequests(controller.signal)
+      .then((catalog) => {
+        if (!controller.signal.aborted) {
+          setAccessRequestCount(catalog.pagination.totalResults);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setAccessRequestCountError(
+            error instanceof Error
+              ? error.message
+              : "Impossible de charger le nombre de demandes.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setAccessRequestCountLoading(false);
+      });
+    return () => controller.abort();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const controller = new AbortController();
+    void getConversations("investor", "", 1, 1, controller.signal)
+      .then((catalog) => {
+        if (!controller.signal.aborted) {
+          setConversationCount(catalog.pagination.totalResults);
+          setConversationCountError("");
+        }
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setConversationCountError(
+            error instanceof Error ? error.message : "Impossible de charger les conversations.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setConversationCountLoading(false);
+      });
+    return () => controller.abort();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setActivityLoading(true);
+      setActivityError("");
+      void getNotifications("", "all", 1, 5, controller.signal)
+        .then((catalog) => {
+          if (!controller.signal.aborted) setRecentNotifications(catalog.notifications);
+        })
+        .catch((error: unknown) => {
+          if (!controller.signal.aborted) {
+            setActivityError(
+              error instanceof Error ? error.message : "Impossible de charger votre activité récente.",
+            );
+          }
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setActivityLoading(false);
+        });
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [activityRetry, user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const controller = new AbortController();
+    void getAppointmentCatalog(
+      "investor/appointments/",
+      { query: "", status: "all", page: 1, pageSize: 1 },
+      controller.signal,
+    )
+      .then((catalog) => {
+        if (!controller.signal.aborted) {
+          setAppointmentCount(catalog.pagination.totalResults);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setAppointmentCountError(
+            error instanceof Error ? error.message : "Impossible de charger le nombre de rendez-vous.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setAppointmentCountLoading(false);
+      });
+    return () => controller.abort();
+  }, [user]);
 
   useEffect(() => {
     if (!mobileMenuOpen) return;
@@ -225,11 +333,12 @@ export default function InvestorDashboard({
       );
     } catch {
       setFavoriteNotice("Le navigateur n’a pas pu enregistrer vos favoris.");
-      return;
+      return false;
     }
     setFavoriteNotice(
       `${title} ${removing ? "a été retiré" : "a été ajouté"} à vos favoris sur cet appareil.`,
     );
+    return true;
   };
 
   if (isLoading) {
@@ -362,6 +471,18 @@ export default function InvestorDashboard({
             <InvestorSectionContent
               section={section}
               user={user}
+              onProfileSaved={(profile) =>
+                setUser((current) =>
+                  current
+                    ? {
+                        ...current,
+                        firstName: profile.firstName,
+                        lastName: profile.lastName,
+                        fullName: profile.fullName,
+                      }
+                    : current,
+                )
+              }
               catalogProjects={catalogProjects}
               projectsLoading={projectsLoading}
               projectsError={projectsError}
@@ -402,20 +523,39 @@ export default function InvestorDashboard({
 
           <section className="investor-dashboard__stats" aria-label="Indicateurs de votre espace">
             {[
-              { label: "Mes projets", icon: "folder" as const, detail: "Aucune donnée synchronisée", target: "projects" },
-              { label: "Demandes d’accès", icon: "handshake" as const, detail: "Aucune donnée synchronisée", target: "requests" },
-              { label: "Rendez-vous", icon: "calendar" as const, detail: "Aucune donnée synchronisée", target: "appointments" },
-              { label: "Favoris", icon: "heart" as const, detail: "Enregistrés sur cet appareil", target: "favorites" },
+              { label: "Conversations", icon: "mail" as const, value: conversationCountLoading ? "…" : conversationCount ?? "—", detail: conversationCountError ? "Synchronisation indisponible" : "Avec les porteurs de projets", target: "messages" },
+              { label: "Demandes d’accès", icon: "handshake" as const, value: accessRequestCountLoading ? "…" : accessRequestCount ?? "—", detail: accessRequestCountError ? "Synchronisation indisponible" : "Demandes envoyées", target: "requests" },
+              { label: "Rendez-vous", icon: "calendar" as const, value: appointmentCountLoading ? "…" : appointmentCount ?? "—", detail: appointmentCountError ? "Synchronisation indisponible" : "Demandes et réponses", target: "appointments" },
+              { label: "Favoris", icon: "heart" as const, value: favorites.length, detail: "Enregistrés sur cet appareil", target: "favorites" },
             ].map((stat) => (
               <Link className="investor-dashboard__stat" key={stat.label} href={`/espace-investisseur/${stat.target}`}>
                 <span className={`investor-dashboard__stat-icon investor-dashboard__stat-icon--${stat.icon}`}>
-                  <ProjectIcon name={stat.icon} size={21} />
+                  {stat.icon === "mail" ? (
+                    <DashboardIcon name="mail" size={21} />
+                  ) : (
+                    <ProjectIcon name={stat.icon} size={21} />
+                  )}
                 </span>
-                <div><span>{stat.label}</span><strong>{stat.label === "Favoris" ? favorites.length : "—"}</strong><small>{stat.detail}</small></div>
+                <div><span>{stat.label}</span><strong>{stat.value}</strong><small>{stat.detail}</small></div>
               </Link>
             ))}
           </section>
 
+          {accessRequestCountError && (
+            <p className="investor-dashboard__notice" role="alert">
+              {accessRequestCountError}
+            </p>
+          )}
+          {appointmentCountError && (
+            <p className="investor-dashboard__notice" role="alert">
+              {appointmentCountError}
+            </p>
+          )}
+          {conversationCountError && (
+            <p className="investor-dashboard__notice" role="alert">
+              {conversationCountError}
+            </p>
+          )}
           {favoriteNotice && (
             <p className="investor-dashboard__notice" role="status">
               {favoriteNotice} Les favoris de cette session ne sont pas encore synchronisés à votre compte.
@@ -425,20 +565,36 @@ export default function InvestorDashboard({
           <div className="investor-dashboard__lower-grid">
             <section className="investor-dashboard__panel">
               <div className="investor-dashboard__panel-heading">
-                <div><span>VOTRE ACTIVITÉ · EXEMPLE</span><h2>Vue d’ensemble</h2></div>
-                <label className="investor-dashboard__period">
-                  <span className="sr-only">Période du graphique</span>
-                  <select value={chartPeriod} onChange={(event) => setChartPeriod(event.target.value as keyof typeof chartPeriods)}>
-                    <option value="7">7 derniers jours</option>
-                    <option value="30">30 derniers jours</option>
-                    <option value="90">3 derniers mois</option>
-                    <option value="180">6 derniers mois</option>
-                    <option value="365">12 derniers mois</option>
-                  </select>
-                </label>
+                <div><span>VOTRE ACTIVITÉ</span><h2>Activité récente</h2></div>
+                <Link className="investor-dashboard__activity-link" href="/espace-investisseur/notifications">Tout voir <ProjectIcon name="arrow" size={15} /></Link>
               </div>
-              <p className="investor-dashboard__chart-disclaimer">Illustration uniquement : ces courbes ne représentent pas votre activité réelle.</p>
-              <InvestorActivityChart period={chartPeriod} />
+              <div className="investor-dashboard__activity-list" aria-busy={activityLoading}>
+                {activityLoading ? (
+                  <p role="status">Chargement de votre activité récente…</p>
+                ) : activityError ? (
+                  <div className="investor-dashboard__activity-state" role="alert">
+                    <p>{activityError}</p>
+                    <button type="button" onClick={() => setActivityRetry((count) => count + 1)}>Réessayer</button>
+                  </div>
+                ) : recentNotifications.length ? (
+                  recentNotifications.map((notification) => (
+                    <Link
+                      className={`investor-dashboard__activity-item${notification.readAt ? "" : " investor-dashboard__activity-item--unread"}`}
+                      href={notification.targetUrl || "/espace-investisseur/notifications"}
+                      key={notification.id}
+                    >
+                      <span className="investor-dashboard__activity-dot" aria-hidden="true" />
+                      <span><strong>{notification.title}</strong><small>{notification.body}</small></span>
+                      <time dateTime={notification.createdAt}>{formatActivityDate(notification.createdAt)}</time>
+                    </Link>
+                  ))
+                ) : (
+                  <div className="investor-dashboard__activity-state">
+                    <DashboardIcon name="clock" size={25} />
+                    <p>Aucune activité récente pour le moment.</p>
+                  </div>
+                )}
+              </div>
             </section>
             <section className="investor-dashboard__panel">
               <div className="investor-dashboard__panel-heading">
@@ -514,51 +670,10 @@ export default function InvestorDashboard({
   );
 }
 
-function InvestorActivityChart({
-  period,
-}: {
-  period: keyof typeof chartPeriods;
-}) {
-  const data = chartPeriods[period];
-  const getPoints = (values: readonly number[]) =>
-    values.map((value, index) => `${32 + index * 92},${174 - value * 1.65}`).join(" ");
-
-  return (
-    <div className="investor-dashboard__chart">
-      <div className="investor-dashboard__chart-legend">
-        <span><i className="investor-dashboard__chart-dot investor-dashboard__chart-dot--visits" /> Visites</span>
-        <span><i className="investor-dashboard__chart-dot investor-dashboard__chart-dot--interactions" /> Interactions</span>
-      </div>
-      <svg viewBox="0 0 620 215" role="img" aria-label="Graphique illustratif des visites et interactions">
-        {[30, 70, 110, 150, 190].map((y) => (
-          <line key={y} x1="30" x2="584" y1={y} y2={y} className="investor-dashboard__chart-grid" />
-        ))}
-        <polyline points={getPoints(data.visits)} className="investor-dashboard__chart-line investor-dashboard__chart-line--visits" />
-        <polyline points={getPoints(data.interactions)} className="investor-dashboard__chart-line investor-dashboard__chart-line--interactions" />
-        {data.visits.map((value, index) => {
-          const x = 32 + index * 92;
-          const visitsY = 174 - value * 1.65;
-          const interactionsY = 174 - data.interactions[index] * 1.65;
-          return (
-            <g key={`${data.labels[index]}-${index}`}>
-              <circle cx={x} cy={visitsY} r="4" className="investor-dashboard__chart-point investor-dashboard__chart-point--visits">
-                <title>{`${data.labels[index]} : ${value} visites (illustration)`}</title>
-              </circle>
-              <circle cx={x} cy={interactionsY} r="4" className="investor-dashboard__chart-point investor-dashboard__chart-point--interactions">
-                <title>{`${data.labels[index]} : ${data.interactions[index]} interactions (illustration)`}</title>
-              </circle>
-              <text x={x} y="207" textAnchor="middle" className="investor-dashboard__chart-label">{data.labels[index]}</text>
-            </g>
-          );
-        })}
-      </svg>
-    </div>
-  );
-}
-
 function InvestorSectionContent({
   section,
   user,
+  onProfileSaved,
   catalogProjects,
   projectsLoading,
   projectsError,
@@ -567,25 +682,15 @@ function InvestorSectionContent({
 }: {
   section: InvestorSection;
   user: AuthenticatedUser;
+  onProfileSaved: (profile: InvestorProfile) => void;
   catalogProjects: CatalogProject[];
   projectsLoading: boolean;
   projectsError: string;
   favorites: number[];
-  onToggleFavorite: (projectId: number, title: string) => void;
+  onToggleFavorite: (projectId: number, title: string) => boolean;
 }) {
   const sectionInfo = investorSections.find((item) => item.id === section);
-  const [projectSearch, setProjectSearch] = useState("");
-  const [selectedSector, setSelectedSector] = useState("Tous les secteurs");
-  const availableSectors = [...new Set(catalogProjects.flatMap((project) => project.sectors))];
   const favoriteProjects = catalogProjects.filter((project) => favorites.includes(project.id));
-  const projects = (section === "favorites" ? favoriteProjects : catalogProjects).filter((project) => {
-    const queryMatch = `${project.title} ${project.description} ${project.owner}`
-      .toLocaleLowerCase("fr")
-      .includes(projectSearch.trim().toLocaleLowerCase("fr"));
-    const sectorMatch =
-      selectedSector === "Tous les secteurs" || project.sectors.includes(selectedSector);
-    return queryMatch && sectorMatch;
-  });
   const publicCatalogSection = section === "explore" || section === "favorites";
 
   return (
@@ -600,101 +705,87 @@ function InvestorSectionContent({
               : "Retrouvez ici les informations et outils associés à votre compte."}
           </p>
         </div>
-        {section === "explore" && (
-          <Link href="/projets">Ouvrir l’explorateur complet <ProjectIcon name="arrow" size={15} /></Link>
-        )}
       </div>
 
-      {publicCatalogSection ? (
+      {section === "appointments" ? (
+        <AppointmentManagement
+          role="investor"
+          projects={catalogProjects}
+          projectsLoading={projectsLoading}
+          projectsError={projectsError}
+        />
+      ) : publicCatalogSection ? (
         <>
           <p className="investor-workspace__notice">
             {section === "favorites"
               ? "Vos favoris sont conservés sur cet appareil. Ils ne sont pas encore synchronisés avec votre compte."
               : "Projets publiés par leurs porteurs; ces informations ne constituent pas une offre d’investissement."}
           </p>
-          <div className="investor-workspace__filters">
-            <label>
-              <span>Rechercher</span>
-              <input
-                type="search"
-                placeholder="Projet, entreprise…"
-                value={projectSearch}
-                onChange={(event) => setProjectSearch(event.target.value)}
-              />
-            </label>
-            <label>
-              <span>Secteur</span>
-              <select value={selectedSector} onChange={(event) => setSelectedSector(event.target.value)}>
-                <option>Tous les secteurs</option>
-                {availableSectors.map((sector) => (
-                  <option key={sector}>{sector}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-          {projectsLoading ? (
-            <p role="status">Chargement des projets publiés…</p>
+          {section === "explore" ? (
+            <ProjectExplorer
+              projects={catalogProjects}
+              stats={null}
+              loadError={projectsError}
+              serverCatalog
+              favoriteProjectIds={favorites}
+              onToggleFavorite={(project) =>
+                onToggleFavorite(project.id, project.title)
+              }
+              projectHrefBase="/projets"
+              showFooter={false}
+              showHero={false}
+              resultsEyebrow="CATALOGUE PUBLIC"
+              resultsTitle="Projets disponibles"
+            />
+          ) : projectsLoading ? (
+            <p role="status">Chargement de vos projets favoris…</p>
           ) : projectsError ? (
             <p role="alert">{projectsError}</p>
-          ) : projects.length ? (
-            <div className="investor-dashboard__projects">
-              {projects.map((project) => (
-                <ProjectCard
-                  key={project.id}
-                  project={project}
-                  isFavorite={favorites.includes(project.id)}
-                  onToggleFavorite={(selected) => onToggleFavorite(selected.id, selected.title)}
-                />
-              ))}
-            </div>
+          ) : favoriteProjects.length ? (
+            <ProjectExplorer
+              projects={favoriteProjects}
+              stats={null}
+              favoriteProjectIds={favorites}
+              onToggleFavorite={(project) =>
+                onToggleFavorite(project.id, project.title)
+              }
+              projectHrefBase="/projets"
+              showFooter={false}
+              showHero={false}
+              resultsEyebrow="VOTRE SÉLECTION"
+              resultsTitle="Projets favoris"
+            />
           ) : (
             <div className="investor-workspace__empty">
-              <ProjectIcon name={section === "favorites" ? "heart" : "search"} size={28} />
-              <h2>{section === "favorites" ? "Aucun favori pour le moment" : "Aucun projet correspondant"}</h2>
-              <p>{section === "favorites" ? "Ajoutez un projet au moyen du bouton cœur pour le retrouver ici." : "Modifiez les critères de recherche ou consultez tout le catalogue."}</p>
+              <ProjectIcon name="heart" size={28} />
+              <h2>Aucun favori pour le moment</h2>
+              <p>Parcourez le catalogue et enregistrez les projets qui vous intéressent pour les retrouver ici.</p>
+              <Link href="/espace-investisseur/explore">Explorer les projets <ProjectIcon name="arrow" size={15} /></Link>
             </div>
           )}
         </>
+      ) : section === "messages" ? (
+        <ConversationWorkspace
+          role="investor"
+          projects={catalogProjects}
+          projectsLoading={projectsLoading}
+          projectsError={projectsError}
+        />
+      ) : section === "notifications" ? (
+        <NotificationInbox />
+      ) : section === "requests" ? (
+        <InvestorAccessRequests />
       ) : section === "profile" ? (
-        <div className="investor-workspace__profile">
-          <div className="investor-workspace__profile-avatar">{`${user.firstName[0] ?? ""}${user.lastName[0] ?? ""}`.toUpperCase()}</div>
-          <div><span>Nom complet</span><strong>{user.fullName}</strong></div>
-          <div><span>Adresse email</span><strong>{user.email}</strong></div>
-          <div><span>Type de compte</span><strong>Investisseur</strong></div>
-          <div><span>Vérification</span><strong>{user.isVerified ? "Profil vérifié" : "Vérification à compléter"}</strong></div>
-          <p>La modification du profil sera disponible lorsque l’API de profil sera intégrée.</p>
-        </div>
+        <InvestorProfileWorkspace user={user} onSaved={onProfileSaved} />
       ) : section === "subscriptions" ? (
-        <div className="investor-workspace__empty">
-          <ProjectIcon name="folder" size={28} />
-          <h2>Aucun abonnement enregistré</h2>
-          <p>Les offres et l’historique d’abonnement ne sont pas encore reliés à votre compte. Aucun paiement n’a été effectué.</p>
-        </div>
+        <InvestorSubscriptionsWorkspace />
+      ) : section === "projects" ? (
+        <InvestorProjects />
       ) : (
         <div className="investor-workspace__empty">
-          {section === "notifications" ? (
-            <DashboardIcon name="bell" size={28} />
-          ) : (
-            <ProjectIcon
-              name={
-                section === "projects" ? "folder" :
-                section === "requests" ? "handshake" :
-                section === "messages" ? "search" : "calendar"
-              }
-              size={28}
-            />
-          )}
-          <h2>
-            {section === "projects" ? "Aucun projet personnel synchronisé" :
-              section === "requests" ? "Aucune demande d’accès synchronisée" :
-              section === "messages" ? "Aucune conversation disponible" :
-              section === "appointments" ? "Aucun rendez-vous synchronisé" :
-              "Aucune notification disponible"}
-          </h2>
-          <p>Cette rubrique est prête à être connectée, mais aucune donnée métier n’est encore fournie par le backend.</p>
-          {section === "projects" || section === "requests" ? (
-            <Link href="/espace-investisseur/explore">Découvrir les projets <ProjectIcon name="arrow" size={15} /></Link>
-          ) : null}
+          <ProjectIcon name="calendar" size={28} />
+          <h2>Aucune donnée disponible</h2>
+          <p>Les informations de cette rubrique apparaîtront ici lorsqu’elles seront disponibles.</p>
         </div>
       )}
     </section>

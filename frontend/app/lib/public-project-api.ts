@@ -177,12 +177,16 @@ function parseFacets(value: unknown): PublicProjectFacets | null {
   };
 }
 
-async function getJson(path: string) {
+async function getJson(path: string, cookieHeader?: string) {
   let response: Response;
   try {
     response = await fetch(apiUrl(path), {
       cache: "no-store",
-      headers: { Accept: "application/json" },
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+      },
     });
   } catch (error) {
     if (error instanceof TypeError) {
@@ -238,8 +242,14 @@ export async function getPublicProjects(
   };
 }
 
-export async function getPublicProject(slug: string): Promise<CatalogProject | null> {
-  const response = await getJson(`projects/${encodeURIComponent(slug)}/`);
+export async function getPublicProject(
+  slug: string,
+  cookieHeader?: string,
+): Promise<CatalogProject | null> {
+  const response = await getJson(
+    `projects/${encodeURIComponent(slug)}/`,
+    cookieHeader,
+  );
   if (response.status === 404) return null;
   if (!response.ok) throw new Error("Ce projet est momentanément indisponible.");
 

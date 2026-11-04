@@ -137,6 +137,89 @@ def student_profile(request):
     )
 
 
+@require_http_methods(["GET", "PATCH"])
+@csrf_protect
+def investor_profile(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"detail": "Vous devez vous connecter."}, status=401)
+    if request.user.role != User.Role.INVESTOR:
+        return JsonResponse(
+            {"detail": "Cette fonctionnalité est réservée aux investisseurs."},
+            status=403,
+        )
+
+    profile_data = request.user.profile_data
+    if not isinstance(profile_data, dict):
+        return JsonResponse(
+            {"detail": "Les informations du profil sont temporairement indisponibles."},
+            status=500,
+        )
+
+    if request.method == "PATCH":
+        payload = _json_body(request)
+        if payload is None:
+            return JsonResponse(
+                {"detail": "La requête doit contenir un objet JSON valide."},
+                status=400,
+            )
+
+        first_name = payload.get("firstName")
+        last_name = payload.get("lastName")
+        phone_number = payload.get("phoneNumber")
+        profile_type = payload.get("profileType")
+        sector = payload.get("sector")
+        if (
+            set(payload)
+            != {"firstName", "lastName", "phoneNumber", "profileType", "sector"}
+            or not isinstance(first_name, str)
+            or not first_name.strip()
+            or len(first_name.strip()) > 150
+            or not isinstance(last_name, str)
+            or len(last_name.strip()) > 150
+            or not isinstance(phone_number, str)
+            or not phone_number.strip()
+            or len(phone_number.strip()) > 30
+            or not isinstance(profile_type, str)
+            or not profile_type.strip()
+            or len(profile_type.strip()) > 150
+            or not isinstance(sector, str)
+            or len(sector.strip()) > 150
+        ):
+            return JsonResponse(
+                {"detail": "Vérifiez les informations de votre profil."},
+                status=400,
+            )
+
+        request.user.first_name = first_name.strip()
+        request.user.last_name = last_name.strip()
+        request.user.phone_number = phone_number.strip()
+        profile_data["profile_type"] = profile_type.strip()
+        profile_data["sector"] = sector.strip()
+        request.user.profile_data = profile_data
+        request.user.save(
+            update_fields=[
+                "first_name",
+                "last_name",
+                "phone_number",
+                "profile_data",
+                "updated_at",
+            ]
+        )
+
+    return JsonResponse(
+        {
+            "firstName": request.user.first_name,
+            "lastName": request.user.last_name,
+            "fullName": request.user.get_full_name() or request.user.email,
+            "email": request.user.email,
+            "phoneNumber": request.user.phone_number,
+            "profileType": profile_data.get("profile_type", ""),
+            "sector": profile_data.get("sector", ""),
+            "isVerified": request.user.is_verified,
+        }
+    )
+
+
 @require_POST
 @csrf_protect
 def login_view(request):
