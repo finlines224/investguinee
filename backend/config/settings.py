@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 from dotenv import load_dotenv
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -190,12 +191,22 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_USER_MODEL = "accounts.User"
 
 secure_cookies = os.getenv("DJANGO_SECURE_COOKIES", str(not DEBUG)).lower() == "true"
+csrf_cookie_samesite = os.getenv("DJANGO_CSRF_COOKIE_SAMESITE", "Lax")
+session_cookie_samesite = os.getenv("DJANGO_SESSION_COOKIE_SAMESITE", "Lax")
+if csrf_cookie_samesite not in {"Lax", "Strict", "None"}:
+    raise ImproperlyConfigured(
+        "DJANGO_CSRF_COOKIE_SAMESITE doit être Lax, Strict ou None."
+    )
+if session_cookie_samesite not in {"Lax", "Strict", "None"}:
+    raise ImproperlyConfigured(
+        "DJANGO_SESSION_COOKIE_SAMESITE doit être Lax, Strict ou None."
+    )
 SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SAMESITE = "Lax"
-SESSION_COOKIE_SECURE = secure_cookies
+SESSION_COOKIE_SAMESITE = session_cookie_samesite
+SESSION_COOKIE_SECURE = secure_cookies or session_cookie_samesite == "None"
 CSRF_COOKIE_HTTPONLY = True
-CSRF_COOKIE_SAMESITE = "Lax"
-CSRF_COOKIE_SECURE = secure_cookies
+CSRF_COOKIE_SAMESITE = csrf_cookie_samesite
+CSRF_COOKIE_SECURE = secure_cookies or csrf_cookie_samesite == "None"
 
 FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
 EMAIL_BACKEND = os.getenv(

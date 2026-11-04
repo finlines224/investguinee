@@ -65,6 +65,16 @@ cache partagé en production pour appliquer les limites entre tous les processus
 Les emails sont écrits dans le terminal en développement ; configurer SMTP avant
 d'activer la récupération de mot de passe en production.
 
+Pour un frontend et un backend hébergés sur des sites différents, ajouter
+l’origine exacte du frontend (sans chemin) à
+`DJANGO_CORS_ALLOWED_ORIGINS` et `DJANGO_CSRF_TRUSTED_ORIGINS`, par exemple
+`https://investguinee.vercel.app`. Régler également
+`DJANGO_CSRF_COOKIE_SAMESITE=None` et
+`DJANGO_SESSION_COOKIE_SAMESITE=None`, avec `DJANGO_SECURE_COOKIES=True`.
+Les valeurs `None` forcent aussi les cookies `Secure`. Le navigateur peut
+toutefois bloquer les cookies tiers selon ses paramètres; un domaine frontend
+et API sous le même site est préférable pour une compatibilité maximale.
+
 ## Catalogue étudiant des formations
 
 Les ressources présentées dans l'espace étudiant sont gérées dans
